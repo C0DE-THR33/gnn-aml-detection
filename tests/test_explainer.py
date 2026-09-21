@@ -42,7 +42,10 @@ def graph():
 @pytest.fixture(scope="module")
 def model(graph):
     torch.manual_seed(42)
-    m = HeterophilyGNN(in_dim=graph.x.shape[1], hidden_dim=16, num_layers=NUM_LAYERS)
+    m = HeterophilyGNN(
+        in_dim=graph.x.shape[1], hidden_dim=16, num_layers=NUM_LAYERS,
+        edge_attr_dim=graph.edge_attr.shape[1],
+    )
     m.eval()
     return m
 

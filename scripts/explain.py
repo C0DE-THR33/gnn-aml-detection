@@ -14,6 +14,7 @@ import pandas as pd
 import torch
 import yaml
 
+from src.data.graph_builder import check_graph_layout
 from src.data.subsample import processed_stem
 from src.device import describe_device, resolve_device
 from src.explain.fidelity import score_typology_fidelity
@@ -44,12 +45,13 @@ def main():
     with open(f"data/processed/{stem}_splits.pkl", "rb") as f:
         splits = pickle.load(f)
 
+    check_graph_layout(data)
     device = resolve_device(config)
     print(f"Device: {describe_device(device)}")
     data = data.to(device)
 
     model = build_model(
-        config["model"]["type"], in_dim=data.x.shape[1],
+        config["model"]["type"], in_dim=data.x.shape[1], edge_attr_dim=data.edge_attr.shape[1],
         hidden_dim=config["model"]["hidden_dim"], num_layers=config["model"]["num_layers"],
     ).to(device)
     # Checkpoints carry their producing config alongside the weights

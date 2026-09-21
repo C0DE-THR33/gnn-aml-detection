@@ -46,6 +46,30 @@ TRANS_COLUMNS = [
     "is_laundering",
 ]
 
+# Payment Format values confirmed present in the real HI-Small Trans.csv (and
+# Patterns.txt). Fixed and canonical per CONVENTIONS.md §2 — never re-derive
+# this list from whatever a given file happens to contain, or the one-hot
+# width (and column order) drifts between the real data and the synthetic
+# fixture, and between runs if a rare format is absent from a subsample.
+# graph_builder.py buckets anything outside this list into a shared "other"
+# column rather than dropping or crashing on it.
+#
+# Rates are the deciding signal for including this as an edge feature at all:
+# illicit rate is 0.75% for ACH vs 0.00% for Wire/Reinvestment across the full
+# HI-Small Trans.csv — a ~42x spread the model previously had no access to
+# (edge_attr was log-amount only). Receiving/Payment Currency was checked too
+# (0.09%-0.42%, ~4x spread) and left out: real but much weaker, and its 15
+# categories would have diluted a strong signal with a weak, noisier one for
+# the width they'd cost. Revisit if amount + payment format alone plateaus.
+PAYMENT_FORMATS: tuple[str, ...] = (
+    "ACH",
+    "Bitcoin",
+    "Cash",
+    "Cheque",
+    "Credit Card",
+    "Reinvestment",
+    "Wire",
+)
 
 ACCOUNT_ID_CANDIDATES = ["account", "account_number", "account_id", "acct"]
 BANK_ID_CANDIDATES = ["bank", "bank_id", "from_bank", "institution"]
