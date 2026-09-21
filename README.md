@@ -1,97 +1,184 @@
 # Explainable AML Detection using Heterophily-Aware GNNs
 
-CSF 3127 (AI in Finance) course project — see `SRS_GNN_AML_Detection.md` for
-the full spec and `CONVENTIONS.md` for coding/naming conventions.
+CSF 3127 (AI in Finance) course project. See `SRS_GNN_AML_Detection.md` for the
+full spec and `CONVENTIONS.md` for coding, naming and git conventions.
 
 ## Status
 
 The full pipeline (data loading → graph construction → training → per-typology
-evaluation → GNNExplainer → per-typology fidelity scoring) is implemented and
-tested end-to-end against a **synthetic fixture** that matches the real
-HI-Small schema. It has **not yet been run against the real Kaggle data** —
-that's the first thing to do (see below).
+evaluation → GNNExplainer → per-typology fidelity) runs end to end on the real
+**HI-Small** data: 5,078,345 transactions, 515,080 accounts, 5,177 illicit
+transactions (0.102%). Training and explanation ran on a Colab T4.
 
-## First thing to do
+- **Last completed sweep** (2026-09-05): 100 epochs, edge features = log-amount
+  only. Results below.
+- **Merged, not yet run:** 300 epochs and payment-format edge features (see
+  [Edge features](#edge-features)). Results below are superseded once that sweep
+  finishes.
 
-1. Download HI-Small from Kaggle: [IBM Transactions for Anti-Money
-   Laundering (AML)](https://www.kaggle.com/datasets/ealtman2019/ibm-transactions-for-anti-money-laundering-aml).
-   You need `HI-Small_Trans.csv` and `HI-Small_Patterns.txt` at minimum;
-   place an `HI-Small_accounts.csv` too if your download includes one.
-2. Put them in `data/raw/` (already gitignored / empty except `.gitkeep`).
-3. **Check `src/data/load_raw.py`'s assumptions against the real files
-   before trusting anything downstream:**
-   - `load_transactions()` assumes the standard 11-column Trans.csv layout
-     — it'll raise a clear error if the column count doesn't match.
-   - `load_accounts()` is written defensively (it doesn't know the real
-     accounts.csv schema for certain) — it'll print the columns it found
-     and raise if it can't identify an account-ID column. Update
-     `ACCOUNT_ID_CANDIDATES`/`BANK_ID_CANDIDATES` in that file if needed.
-   - `parse_patterns()` assumes the confirmed `BEGIN/END LAUNDERING
-     ATTEMPT - <TYPOLOGY>` block format — sanity-check a few parsed rows
-     against the raw file by eye the first time.
-4. Run the pipeline (see below).
+## Results so far
+
+Test split: 1,015,669 edges, 1,797 illicit (0.177%), so the AUPRC of a random
+ranker is **0.00177**. Three seeds per architecture, same graph, same splits,
+configs identical except `model.type` (enforced by `tests/test_configs.py`).
+
+| model | test AUPRC (mean, range) | lift over chance | recall | F1 |
+|---|---|---|---|---|
+| `heterophily_gnn` | 0.0372 (0.0357–0.0383) | 21.0x | 0.832 | 0.0153 |
+| `baseline_sage` | 0.0263 (0.0240–0.0278) | 14.8x | 0.794 | 0.0136 |
+
+- **Heterophily-aware beats the baseline** by 41.5% relative AUPRC. The ranges do
+  not overlap and the gap is ~2.9x the largest within-model seed spread. It wins
+  on all eight typologies (1.03x–5.0x). n=3 per arm, so read this as an effect
+  size, not a significance test.
+- **Both models were undertrained.** Train and validation AUPRC were still
+  rising monotonically at epoch 100 and loss was still falling; the negative
+  train/val gap is prevalence drift (below), not overfitting.
+- **Detection and explanation quality are inversely related.** Across typologies,
+  Spearman(detection lift, fidelity) = −0.893 (p = 0.007, n = 7). `cycle` is the
+  best-detected structural typology (47.7x) and its explanations almost never
+  contain a cycle (fidelity 0.007); `random`, which has no structure by design,
+  is the best-detected class overall. The model's signal is not typology
+  topology. Fidelity is measured on one checkpoint under three explainer seeds
+  (n = 150 per typology, seed spread 0.005–0.040).
+- **Do not quote accuracy.** A model that always predicts "licit" scores 99.82%;
+  the real models score ~80% because `pos_weight` (~1,325) pushes them to flag
+  ~20% of traffic. Lead with AUPRC against the base rate.
+
+These numbers come from Colab run outputs, which are not versioned (`outputs/`
+is gitignored, per CONVENTIONS §7).
 
 ## Setup
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+export PYTHONPATH=.   # scripts use absolute imports (from src.data...)
 ```
 
-Scripts import from `src/` using absolute imports (`from src.data...`), so
-run everything from the repo root with the repo root on `PYTHONPATH`:
+Developed on Python 3.12 locally and 3.13 on Colab. On a CPU-only machine,
+install torch from the CPU wheel index to avoid the large CUDA download.
 
-```bash
-export PYTHONPATH=.
-```
+**Hardware.** Graph construction and the test suite run fine on a laptop. Full
+training does not: it is full-batch over 5.08M edges, and on a 7.7 GB RAM machine
+a run had not reached its first log point (epoch 10) after ~7 minutes and was
+paging heavily, so it was stopped. Use a GPU; the Colab notebook below is set
+up for a T4.
+
+## Data
+
+Download HI-Small from Kaggle ([IBM Transactions for Anti-Money Laundering
+(AML)](https://www.kaggle.com/datasets/ealtman2019/ibm-transactions-for-anti-money-laundering-aml))
+and place `HI-Small_Trans.csv`, `HI-Small_Patterns.txt` and
+`HI-Small_accounts.csv` in `data/raw/` (gitignored).
+
+Checked against the real files: Trans.csv has the assumed 11 columns;
+Patterns.txt has all 8 typology labels and they map cleanly; accounts.csv has
+`Bank Name, Bank ID, Account Number, Entity ID, Entity Name` and now loads with
+unique column names (it previously returned two columns called `bank_id`).
 
 ## Running the pipeline
 
 ```bash
-# 1. Data ingestion + graph construction (SRS §4 stage 1)
+# 1. Graph construction (~300 MB output in data/processed/)
 python scripts/build_graph.py --config configs/heterophily_gnn_hismall.yaml
 
-# 2. Model training + classification evaluation (stages 2-3)
-python scripts/train.py --config configs/heterophily_gnn_hismall.yaml
-# -> prints overall + per-typology test metrics, saves a checkpoint to
-#    outputs/checkpoints/ and per-typology metrics to outputs/metrics/
+# 2. Train + evaluate. --seed overrides the config; it is part of the run id.
+python scripts/train.py --config configs/heterophily_gnn_hismall.yaml --seed 42
+python scripts/train.py --config configs/baseline_sage_hismall.yaml   --seed 42
 
-# 3. Explanation generation + fidelity evaluation (stages 4-5)
+# 3. Explain + score fidelity (also takes --seed: GNNExplainer is stochastic)
 python scripts/explain.py --config configs/heterophily_gnn_hismall.yaml \
-    --checkpoint outputs/checkpoints/<run_id_from_step_2>.pt
-# -> saves per-edge fidelity scores to outputs/explanations/
+    --checkpoint outputs/checkpoints/<run_id>.pt --seed 42
 ```
 
-## Testing without the real data
+| config | purpose |
+|---|---|
+| `heterophily_gnn_hismall.yaml` | the model under study, full graph |
+| `baseline_sage_hismall.yaml` | homophily control (SRS FR-5), full graph |
+| `heterophily_gnn_hismall_sub2m.yaml` | earliest 2M transactions only; holds just 984 of the 5,177 illicit edges, so it is a poor benchmark |
 
-`tests/make_synthetic_fixture.py` generates a small fixture matching the
-real schema (Trans.csv/accounts.csv/Patterns.txt, all 8 typologies) so the
-whole pipeline can be exercised before the Kaggle download:
+Outputs land in `outputs/{checkpoints,metrics,explanations,reports}/`, named
+`{date}_{run_id_prefix}_seed{N}`. Each `*_overall.csv` holds one run's test
+metrics (with model, seed and config path) so a sweep pools with a glob.
+
+### On Colab
 
 ```bash
-python tests/make_synthetic_fixture.py
+python scripts/make_colab_bundle.py   # -> colab/gnn_aml_code.zip
+```
+
+Put `gnn_aml_code.zip`, `hismall_graph.pt` and `hismall_splits.pkl` (from
+`data/processed/`) plus `colab/run_on_colab.ipynb` in `MyDrive/gnn-aml/`, choose a
+**T4 GPU** runtime, and run the cells top to bottom. The notebook trains both
+architectures over three seeds, pools the results, then explains the heterophily
+checkpoint under three explainer seeds. Each finished run is synced to Drive so a
+disconnect loses at most the run in progress.
+
+The graph must be rebuilt whenever the edge feature layout changes. `train.py`
+and `explain.py` check this and stop with a clear error on a stale graph.
+
+## Tests
+
+```bash
+python tests/make_synthetic_fixture.py   # only if tests/fixtures/ is missing
 pytest tests/ -v
 ```
 
-All 10 tests currently pass against the fixture. **This validates the code
-runs correctly — it says nothing about model performance on real data**,
-since the fixture's "laundering patterns" are randomly generated, not
-learned signal.
+47 tests against a small synthetic fixture matching the HI-Small schema. They
+verify the code runs and that specific past defects stay fixed (fidelity scorer
+bugs, the accounts loader, the Colab bundle, config drift). **They say nothing
+about model performance on real data**: the fixture's laundering patterns are
+random.
 
-## A few things worth knowing before you dig into the code
+## Design notes
 
-- **The heterophily-aware layer had to be built on `MessagePassing`, not a
-  hand-rolled scatter op** — GNNExplainer's edge-mask hook only works on
-  layers that go through `propagate()`/`message()`. See the docstring in
-  `src/models/heterophily_gnn.py` if you extend the architecture; a
-  from-scratch aggregation layer will silently break explainability.
-- **Node features are minimal for now** (in/out-degree only) — real
-  account-level features depend on confirming `accounts.csv`'s actual
-  schema against step 3 above.
-- **Message passing runs over the full graph; only loss/metrics are split**
-  by time. This is documented as a known limitation in the SRS (§2.5,
-  §6.3) rather than solved — a fully temporal formulation is out of scope
-  per SRS §1.2.
-- **Typology.RANDOM has no fidelity scorer on purpose** — see
-  `src/explain/fidelity.py`'s module docstring for why "not scored" is the
-  honest answer, not a bug.
+### Edge features
+
+`edge_attr` is `[log-amount | payment-format one-hot]`, 9 columns. Payment format
+is the strongest signal in the data: the illicit rate is 0.75% for ACH against
+0.00% for Wire and Reinvestment (a ~42x spread), and the encoded columns
+reproduce those per-format counts exactly on the real graph. Currency was checked
+and left out (0.09%–0.42%, ~4x, and 15 categories). The one-hot uses the fixed
+list `load_raw.PAYMENT_FORMATS`, so the layout is identical across the real data,
+the fixture and any subsample.
+
+### Things worth knowing before you change code
+
+- **The heterophily layer must be built on `MessagePassing`,** not a hand-rolled
+  scatter: GNNExplainer's edge-mask hook only sees `propagate()`/`message()`. See
+  `src/models/heterophily_gnn.py`.
+- **Explanations run on each edge's L-hop subgraph, not the full graph.** The full
+  graph exhausts a 15 GB GPU; a test asserts subgraph logits equal full-graph
+  logits. Neighbourhoods over 400,000 edges (hub accounts) are skipped, about 10
+  instances per seed.
+- **Fidelity scorers are heuristic proxies** for "looks like this typology", not
+  graph isomorphism. `random` and `unclassified` are deliberately unscored.
+- **Per-typology metrics** score a typology's illicit edges against all licit
+  edges. Scoring it against its own edges alone pins precision and AUPRC at 1.0.
+- **Training is not bit-reproducible on GPU** (CUDA scatter reductions are
+  non-deterministic). One config produced AUPRC anywhere from 0.026 to 0.040
+  across runs, so report a range over at least three seeds.
+
+### Known limitations
+
+- **Temporal leakage.** Message passing and the in/out-degree node features use
+  the full graph, including test edges, so the lifts above are optimistic by an
+  unknown amount (SRS §2.5, §6.3; a temporal formulation is out of scope per §1.2).
+- **The split is not prevalence-matched.** Illicit density rises across the
+  window: train 0.075%, val 0.107%, test 0.177%. Train and val metrics are not
+  directly comparable.
+- **Node features are in/out-degree only.** `accounts.csv` (entity type, bank) is
+  loaded correctly but unused.
+- **Account identity is the account number alone.** 8 account numbers exist under
+  two different banks, so 8 pairs of distinct accounts are merged into 8 nodes
+  (515,080 nodes vs 515,088 distinct bank+account pairs; 0.0016%).
+
+### Next steps
+
+1. Run the 300-epoch + payment-format sweep. Because there is no LR schedule, the
+   epoch-100 row of each new log compares like for like with the previous sweep
+   (edge-feature effect), and the gain from epoch 100 to 300 is the
+   training-length effect. Don't credit the final number to either alone.
+2. Account-level node features from `accounts.csv`.
+3. Remove the degree leakage.
