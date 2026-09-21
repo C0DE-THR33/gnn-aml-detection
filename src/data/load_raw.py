@@ -198,8 +198,27 @@ def parse_patterns(path: str | Path) -> pd.DataFrame:
 
 
 def _find_column(columns, candidates) -> Optional[str]:
+    """Find the column matching one of `candidates`, preferring exact names.
+
+    Exact matches win over substring matches, in candidate priority order. The
+    previous single-pass version returned the first substring hit, so on the
+    real accounts.csv ("Bank Name", "Bank ID", ...) the candidate "bank"
+    matched "bank_name" before the exact "bank_id" was reached; the bank NAME
+    was then renamed to "bank_id", leaving two columns with that name.
+
+    Args:
+        columns: Iterable of normalized (snake_case) column names.
+        candidates: Acceptable names, most preferred first.
+
+    Returns:
+        The matching column name, or None.
+    """
+    cols = list(columns)
     for cand in candidates:
-        for col in columns:
-            if cand == col or cand in col:
+        if cand in cols:
+            return cand
+    for cand in candidates:
+        for col in cols:
+            if cand in col:
                 return col
     return None
