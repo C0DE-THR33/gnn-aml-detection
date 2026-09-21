@@ -103,3 +103,21 @@ def test_fidelity_scorer_handles_all_typologies(loaded_data):
             assert score is None  # random has no defined signature — see fidelity.py
         else:
             assert score is None or 0.0 <= score <= 1.0
+
+
+def test_load_accounts_on_real_schema_has_unique_columns(tmp_path):
+    """The real HI-Small_accounts.csv has 'Bank Name' AND 'Bank ID'. A substring
+    match on 'bank' used to rename the NAME onto bank_id, producing two columns
+    with the same name."""
+    path = tmp_path / "accounts.csv"
+    path.write_text(
+        "Bank Name,Bank ID,Account Number,Entity ID,Entity Name\n"
+        "Portugal Bank #4507,331579,80B779D80,80062E240,Sole Proprietorship #50438\n"
+        "Canada Bank #27,210,809D86900,800C998A0,Corporation #33520\n",
+        encoding="utf-8",
+    )
+    df = load_accounts(path)
+    assert list(df.columns).count("bank_id") == 1, list(df.columns)
+    assert df["bank_id"].tolist() == ["331579", "210"]  # the ID, not the name
+    assert df["bank_name"].tolist() == ["Portugal Bank #4507", "Canada Bank #27"]
+    assert df["account_id"].tolist() == ["80B779D80", "809D86900"]
