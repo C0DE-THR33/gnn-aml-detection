@@ -1,0 +1,47 @@
+# Per CONVENTIONS.md §4: one config = one reproducible experiment.
+# Referenced dataset tag is fixed to hismall — see CONVENTIONS.md §2.
+
+run_id_prefix: heterosage_hismall_baseline
+
+dataset:
+  name: hismall  # HI-Small — locked in (see SRS §1.2 "Dataset selection")
+  trans_path: data/raw/HI-Small_Trans.csv
+  accounts_path: data/raw/HI-Small_accounts.csv
+  patterns_path: data/raw/HI-Small_Patterns.txt
+
+# "auto" uses CUDA when a GPU is present (e.g. a Colab T4) and falls back to
+# CPU otherwise. Pin explicitly with "cpu" / "cuda:0" if you need to.
+device: auto
+
+seed: 42
+
+split:
+  train_frac: 0.6
+  val_frac: 0.2
+  # test_frac is the remainder (0.2)
+
+model:
+  type: heterophily_gnn  # or baseline_sage
+  hidden_dim: 64
+  num_layers: 2
+
+train:
+  epochs: 100
+  lr: 0.001
+  weight_decay: 0.00001
+  log_every: 10
+
+loss:
+  type: weighted_ce  # or focal
+  # pos_weight is computed automatically from the train split (see
+  # src/training/losses.py:compute_pos_weight) unless overridden here:
+  # pos_weight: null
+
+explain:
+  explain_epochs: 200
+  # Raised from 15: at 15 the fidelity means had 95% CIs of +/-0.10-0.13 and
+  # did not replicate across runs. Several typologies have fewer than 50 test
+  # positives (bipartite 74, cycle 109, fan_in 137), so this is an upper bound.
+  per_typology_cap: 50   # SRS FR-8: cap sampled true positives per typology
+  top_k_edges: 6         # SRS FR-11: edges kept when scoring fidelity
+  save_subgraph_figures: true  # SRS FR-12 / CONVENTIONS.md §5

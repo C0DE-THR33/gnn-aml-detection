@@ -1,0 +1,64 @@
+# Per CONVENTIONS.md §4: one config = one reproducible experiment. This is a
+# copy of heterophily_gnn_hismall.yaml with a subsample block added — NOT a
+# reuse of that config for a different run.
+#
+# Why it exists: full-batch training over all 5,078,345 edges does not fit in
+# this machine's 7.7 GB of RAM. A measured sweep of one training epoch showed
+# per-edge cost flat at ~12-13 µs/edge up to 2M edges, then doubling to
+# ~27 µs/edge at 3M as the process began paging; at 5.08M a single epoch did
+# not complete. SRS NFR-2 ("or be subsampled if this is not achievable") and
+# the SRS risk table both sanction subsampling as the mitigation.
+#
+# Dataset tag stays `hismall` per CONVENTIONS.md §2 — this is still HI-Small,
+# just less of it. Artifacts land under data/processed/hismall_sub2000000_*
+# so they don't overwrite the full-graph build.
+
+run_id_prefix: heterosage_hismall_sub2m
+
+dataset:
+  name: hismall  # HI-Small — locked in (see SRS §1.2 "Dataset selection")
+  trans_path: data/raw/HI-Small_Trans.csv
+  accounts_path: data/raw/HI-Small_accounts.csv
+  patterns_path: data/raw/HI-Small_Patterns.txt
+
+# Keeps the earliest 2,000,000 transactions by timestamp. A contiguous
+# temporal prefix is used rather than a random edge sample so laundering
+# pattern subgraphs stay intact for the fidelity evaluation, and so the
+# natural ~0.1% illicit class balance is preserved. See src/data/subsample.py.
+subsample:
+  strategy: temporal_prefix
+  n_transactions: 2000000
+
+# "auto" uses CUDA when a GPU is present (e.g. a Colab T4) and falls back to
+# CPU otherwise. Pin explicitly with "cpu" / "cuda:0" if you need to.
+device: auto
+
+seed: 42
+
+split:
+  train_frac: 0.6
+  val_frac: 0.2
+  # test_frac is the remainder (0.2)
+
+model:
+  type: heterophily_gnn  # or baseline_sage
+  hidden_dim: 64
+  num_layers: 2
+
+train:
+  epochs: 100
+  lr: 0.001
+  weight_decay: 0.00001
+  log_every: 10
+
+loss:
+  type: weighted_ce  # or focal
+  # pos_weight is computed automatically from the train split (see
+  # src/training/losses.py:compute_pos_weight) unless overridden here:
+  # pos_weight: null
+
+explain:
+  explain_epochs: 200
+  per_typology_cap: 15   # SRS FR-8: cap sampled true positives per typology
+  top_k_edges: 6         # SRS FR-11: edges kept when scoring fidelity
+  save_subgraph_figures: true  # SRS FR-12 / CONVENTIONS.md §5
