@@ -66,7 +66,7 @@ def test_model_trains_without_error(loaded_data, model_cls):
     trans, patterns, _ = loaded_data
     data = build_transaction_graph(trans, patterns).data
     splits = make_temporal_split(trans)
-    model = model_cls(in_dim=data.x.shape[1])
+    model = model_cls(in_dim=data.x.shape[1], edge_attr_dim=data.edge_attr.shape[1])
     result = train_model(model, data, splits, TrainConfig(epochs=5, log_every=5))
     assert len(result.history) >= 1
     assert torch.isfinite(torch.tensor(result.history[-1]["train_loss"]))
@@ -79,7 +79,7 @@ def test_explainer_runs_on_heterophily_gnn(loaded_data):
     trans, patterns, _ = loaded_data
     data = build_transaction_graph(trans, patterns).data
     splits = make_temporal_split(trans)
-    model = HeterophilyGNN(in_dim=data.x.shape[1])
+    model = HeterophilyGNN(in_dim=data.x.shape[1], edge_attr_dim=data.edge_attr.shape[1])
     train_model(model, data, splits, TrainConfig(epochs=5, log_every=5))
 
     illicit_idx = [i for i in splits["test"] if data.y[i] == 1]

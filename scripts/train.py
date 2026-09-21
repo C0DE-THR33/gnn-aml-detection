@@ -14,6 +14,7 @@ import pandas as pd
 import torch
 import yaml
 
+from src.data.graph_builder import check_graph_layout
 from src.data.subsample import processed_stem
 from src.device import describe_device, resolve_device
 from src.eval.metrics import classification_metrics, per_typology_metrics
@@ -22,11 +23,20 @@ from src.models.heterophily_gnn import HeterophilyGNN
 from src.training.train import TrainConfig, train_model
 
 
-def build_model(model_type: str, in_dim: int, hidden_dim: int, num_layers: int):
+def build_model(
+    model_type: str, in_dim: int, hidden_dim: int, num_layers: int, edge_attr_dim: int
+):
+    """Construct a model, sizing its edge head from the graph it will see.
+
+    edge_attr_dim is required, not defaulted: it must come from
+    data.edge_attr.shape[1] so the model and the graph cannot disagree.
+    """
+    kwargs = dict(in_dim=in_dim, hidden_dim=hidden_dim, num_layers=num_layers,
+                  edge_attr_dim=edge_attr_dim)
     if model_type == "heterophily_gnn":
-        return HeterophilyGNN(in_dim=in_dim, hidden_dim=hidden_dim, num_layers=num_layers)
+        return HeterophilyGNN(**kwargs)
     if model_type == "baseline_sage":
-        return BaselineSAGE(in_dim=in_dim, hidden_dim=hidden_dim, num_layers=num_layers)
+        return BaselineSAGE(**kwargs)
     raise ValueError(f"Unknown model.type '{model_type}' — expected 'heterophily_gnn' or 'baseline_sage'.")
 
 
@@ -51,12 +61,13 @@ def main():
     with open(f"data/processed/{stem}_splits.pkl", "rb") as f:
         splits = pickle.load(f)
 
+    check_graph_layout(data)
     device = resolve_device(config)
     print(f"Device: {describe_device(device)}")
     data = data.to(device)
 
     model = build_model(
-        config["model"]["type"], in_dim=data.x.shape[1],
+        config["model"]["type"], in_dim=data.x.shape[1], edge_attr_dim=data.edge_attr.shape[1],
         hidden_dim=config["model"]["hidden_dim"], num_layers=config["model"]["num_layers"],
     ).to(device)
 

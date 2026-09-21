@@ -26,7 +26,9 @@ model:
   num_layers: 2
 
 train:
-  epochs: 100
+  # 100 was not enough: in the 6-run sweep both train and val AUPRC were still
+  # rising monotonically at epoch 100 and loss was still falling.
+  epochs: 300
   lr: 0.001
   weight_decay: 0.00001
   log_every: 10
