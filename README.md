@@ -45,8 +45,10 @@ configs identical except `model.type` (enforced by `tests/test_configs.py`).
   the real models score ~80% because `pos_weight` (~1,325) pushes them to flag
   ~20% of traffic. Lead with AUPRC against the base rate.
 
-These numbers come from Colab run outputs, which are not versioned (`outputs/`
-is gitignored, per CONVENTIONS §7).
+These numbers come from the 2026-09-05 Colab runs (seeds 42–44). Their metrics
+CSVs (`outputs/metrics/`), fidelity CSVs (`outputs/explanations/fidelity_*.csv`)
+and report figures (`outputs/reports/figures/`) are versioned; checkpoints, logs
+and per-transaction explanation images stay gitignored (CONVENTIONS §7).
 
 ## Setup
 

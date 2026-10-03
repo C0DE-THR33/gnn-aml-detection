@@ -6,15 +6,22 @@ data/interim/*
 data/processed/*
 !data/processed/.gitkeep
 
-# Trained artifacts
+# Trained artifacts. The small result files the README's numbers come from
+# (metrics CSVs, fidelity CSVs, report figures) are versioned; checkpoints,
+# logs and per-transaction explanation images are not.
 outputs/checkpoints/*
 !outputs/checkpoints/.gitkeep
 outputs/metrics/*
 !outputs/metrics/.gitkeep
+!outputs/metrics/*.csv
 outputs/explanations/*
 !outputs/explanations/.gitkeep
+!outputs/explanations/fidelity_*.csv
 outputs/reports/*
 !outputs/reports/.gitkeep
+!outputs/reports/figures/
+outputs/reports/figures/*
+!outputs/reports/figures/*.png
 
 __pycache__/
 *.pyc
