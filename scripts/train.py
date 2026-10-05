@@ -15,7 +15,6 @@ import torch
 import yaml
 
 from src.data.graph_builder import check_graph_layout
-from src.data.subsample import processed_stem
 from src.device import describe_device, resolve_device
 from src.eval.metrics import classification_metrics, per_typology_metrics
 from src.models.baseline_sage import BaselineSAGE
@@ -56,7 +55,7 @@ def main():
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    stem = processed_stem(config)
+    stem = config["dataset"]["name"]
     data = torch.load(f"data/processed/{stem}_graph.pt", weights_only=False)
     with open(f"data/processed/{stem}_splits.pkl", "rb") as f:
         splits = pickle.load(f)
