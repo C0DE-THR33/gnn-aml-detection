@@ -98,7 +98,6 @@ python scripts/explain.py --config configs/heterophily_gnn_hismall.yaml \
 |---|---|
 | `heterophily_gnn_hismall.yaml` | the model under study, full graph |
 | `baseline_sage_hismall.yaml` | homophily control (SRS FR-5), full graph |
-| `heterophily_gnn_hismall_sub2m.yaml` | earliest 2M transactions only; holds just 984 of the 5,177 illicit edges, so it is a poor benchmark |
 
 Outputs land in `outputs/{checkpoints,metrics,explanations,reports}/`, named
 `{date}_{run_id_prefix}_seed{N}`. Each `*_overall.csv` holds one run's test
