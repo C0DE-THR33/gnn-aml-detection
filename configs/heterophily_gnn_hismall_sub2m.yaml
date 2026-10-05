@@ -46,7 +46,9 @@ model:
   num_layers: 2
 
 train:
-  epochs: 100
+  # 100 was not enough: in the 6-run sweep both train and val AUPRC were still
+  # rising monotonically at epoch 100 and loss was still falling.
+  epochs: 300
   lr: 0.001
   weight_decay: 0.00001
   log_every: 10
@@ -59,6 +61,9 @@ loss:
 
 explain:
   explain_epochs: 200
-  per_typology_cap: 15   # SRS FR-8: cap sampled true positives per typology
+  # Raised from 15: at 15 the fidelity means had 95% CIs of +/-0.10-0.13 and
+  # did not replicate across runs. Several typologies have fewer than 50 test
+  # positives (bipartite 74, cycle 109, fan_in 137), so this is an upper bound.
+  per_typology_cap: 50   # SRS FR-8: cap sampled true positives per typology
   top_k_edges: 6         # SRS FR-11: edges kept when scoring fidelity
   save_subgraph_figures: true  # SRS FR-12 / CONVENTIONS.md §5
