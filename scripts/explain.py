@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import pickle
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -81,7 +82,9 @@ def main():
     seed = args.seed if args.seed is not None else config["seed"]
     torch.manual_seed(seed)
     print(f"Explainer seed: {seed}")
-    run_id = f"{config['run_id_prefix']}_seed{seed}"
+    # Dated like train.py's run IDs (CONVENTIONS.md §2), so a later sweep's
+    # fidelity CSV and report figure don't overwrite an earlier one's.
+    run_id = f"{datetime.now():%Y%m%d}_{config['run_id_prefix']}_seed{seed}"
     save_figures = config["explain"].get("save_subgraph_figures", True)
     fig_dir = Path("outputs/explanations/figures")
 
