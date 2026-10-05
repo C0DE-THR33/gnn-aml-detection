@@ -12,6 +12,7 @@ import torch
 from src.data.graph_builder import build_transaction_graph
 from src.data.load_raw import load_accounts, load_transactions, parse_patterns
 from src.data.make_splits import make_temporal_split
+from src.eval.metrics import classification_metrics
 from src.explain.fidelity import score_typology_fidelity
 from src.explain.run_explainer import build_explainer, explain_edge, select_explanation_sample
 from src.models.baseline_sage import BaselineSAGE
@@ -70,6 +71,33 @@ def test_model_trains_without_error(loaded_data, model_cls):
     result = train_model(model, data, splits, TrainConfig(epochs=5, log_every=5))
     assert len(result.history) >= 1
     assert torch.isfinite(torch.tensor(result.history[-1]["train_loss"]))
+
+
+def test_training_restores_the_best_val_epoch(loaded_data):
+    """A long run that peaks and then overfits must be checkpointed and
+    test-scored at its best val AUPRC, not at its final epoch."""
+    trans, patterns, _ = loaded_data
+    data = build_transaction_graph(trans, patterns).data
+    splits = make_temporal_split(trans)
+    # Seeded so this run's val AUPRC peaks at epoch 6 of 20; without that the
+    # best epoch can be the last one and the restore goes untested.
+    torch.manual_seed(0)
+    model = HeterophilyGNN(in_dim=data.x.shape[1], edge_attr_dim=data.edge_attr.shape[1])
+    result = train_model(model, data, splits, TrainConfig(epochs=20, log_every=2))
+
+    val_auprcs = {r["epoch"]: r["val_auprc"] for r in result.history}
+    assert result.best_epoch == max(val_auprcs, key=val_auprcs.get)
+    assert result.best_epoch < 20, "best epoch is the last; the restore is not exercised"
+    assert result.best_val_auprc == val_auprcs[result.best_epoch]
+
+    # The returned weights reproduce the best epoch's val AUPRC.
+    model.eval()
+    with torch.no_grad():
+        probs = torch.softmax(model(data.x, data.edge_index, data.edge_attr), dim=1)[:, 1]
+    val_idx = splits["val"]
+    y = data.y.numpy()[val_idx]
+    restored = classification_metrics(y, (probs.numpy()[val_idx] >= 0.5).astype(int), probs.numpy()[val_idx])
+    assert restored["auprc"] == pytest.approx(result.best_val_auprc)
 
 
 def test_explainer_runs_on_heterophily_gnn(loaded_data):
