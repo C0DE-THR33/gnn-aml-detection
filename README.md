@@ -60,9 +60,8 @@ configs identical except `model.type` (enforced by `tests/test_configs.py`).
 
 Both sweeps are versioned: metrics CSVs (`outputs/metrics/{date}_*`), fidelity
 CSVs (`outputs/explanations/fidelity_{date}_*.csv`) and report figures
-(`outputs/reports/figures/{date}_*`). `explain.py` writes the fidelity CSV and
-figure without a date; the date prefix is added when a sweep is versioned.
-Checkpoints, logs and per-transaction explanation images stay gitignored
+(`outputs/reports/figures/{date}_*`); `train.py` and `explain.py` date them
+with the day the run started. Checkpoints, logs and per-transaction explanation images stay gitignored
 (CONVENTIONS §7).
 
 ## Setup
