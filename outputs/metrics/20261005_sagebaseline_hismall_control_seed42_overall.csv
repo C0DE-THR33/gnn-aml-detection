@@ -1,0 +1,2 @@
+run_id,model,seed,config_path,best_epoch,best_val_auprc,precision,recall,f1,auprc,accuracy,trivial_accuracy,n
+20261005_sagebaseline_hismall_control_seed42,baseline_sage,42,configs/baseline_sage_hismall.yaml,270,0.050933092641627015,0.009951845906902087,0.9833055091819699,0.019704268700655694,0.08714058765009822,0.8268943917752732,0.9982307228043782,1015669
