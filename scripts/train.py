@@ -124,6 +124,9 @@ def main():
         "model": config["model"]["type"],
         "seed": seed,
         "config_path": args.config,
+        # Test metrics and the checkpoint come from this epoch, not the last.
+        "best_epoch": result.best_epoch,
+        "best_val_auprc": result.best_val_auprc,
         **overall,
     }
     pd.DataFrame([overall_row]).to_csv(f"outputs/metrics/{run_id}_overall.csv", index=False)

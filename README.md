@@ -102,6 +102,9 @@ python scripts/explain.py --config configs/heterophily_gnn_hismall.yaml \
 Outputs land in `outputs/{checkpoints,metrics,explanations,reports}/`, named
 `{date}_{run_id_prefix}_seed{N}`. Each `*_overall.csv` holds one run's test
 metrics (with model, seed and config path) so a sweep pools with a glob.
+Training keeps the weights from the log point with the best val AUPRC, so the
+checkpoint and test metrics come from that epoch (`best_epoch` in
+`*_overall.csv`), not necessarily the last.
 
 ### On Colab
 

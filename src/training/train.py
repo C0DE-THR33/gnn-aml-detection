@@ -79,6 +79,10 @@ class TrainConfig:
 class TrainResult:
     model: torch.nn.Module
     history: list = field(default_factory=list)
+    # Log-point epoch whose weights `model` holds on return (None if val AUPRC
+    # was never defined, in which case `model` holds the final epoch's weights).
+    best_epoch: int | None = None
+    best_val_auprc: float | None = None
 
 
 def _compute_loss(logits, y, loss_type, pos_weight):
@@ -104,7 +108,10 @@ def train_model(
         config: TrainConfig.
 
     Returns:
-        TrainResult with the trained model and per-epoch history.
+        TrainResult with per-epoch history and the model restored to the
+        weights from the log point with the highest val AUPRC. Without this,
+        a long run that peaks and then overfits would be checkpointed and
+        test-scored at its final, worse epoch.
     """
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
@@ -123,6 +130,7 @@ def train_model(
     train_eval_idx = select_train_eval_idx(train_idx, data.y, config.seed)
 
     history = []
+    best_epoch, best_val_auprc, best_state = None, None, None
     for epoch in range(1, config.epochs + 1):
         model.train()
         optimizer.zero_grad()
@@ -152,6 +160,11 @@ def train_model(
                 **{f"val_{k}": v for k, v in val_metrics.items()},
             }
             history.append(record)
+            # Val AUPRC is NaN when the val split has no positives; skip it.
+            val_auprc = val_metrics["auprc"]
+            if not np.isnan(val_auprc) and (best_val_auprc is None or val_auprc > best_val_auprc):
+                best_epoch, best_val_auprc = epoch, val_auprc
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
             print(
                 f"epoch {epoch:4d} | train_loss {loss.item():.4f} | "
                 f"train_auprc {train_metrics['auprc']:.4f} | "
@@ -162,4 +175,9 @@ def train_model(
                 f"gap {train_metrics['auprc'] - val_metrics['auprc']:+.4f}"
             )
 
-    return TrainResult(model=model, history=history)
+    if best_state is not None:
+        model.load_state_dict(best_state)
+        print(f"Restored best epoch {best_epoch} (val_auprc {best_val_auprc:.4f})")
+    return TrainResult(
+        model=model, history=history, best_epoch=best_epoch, best_val_auprc=best_val_auprc
+    )
