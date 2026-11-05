@@ -26,10 +26,17 @@ model:
   num_layers: 2
 
 train:
-  # 100 was not enough: in the 6-run sweep both train and val AUPRC were still
-  # rising monotonically at epoch 100 and loss was still falling.
-  epochs: 300
-  lr: 0.001
+  # Full-batch training takes ONE optimizer step per epoch, so 300 epochs was
+  # 300 steps: in the 2026-10-05 sweep train AUPRC (~0.048) never exceeded val
+  # (~0.053), i.e. underfit. 1000 epochs is ~3.3x the GPU time of that sweep.
+  epochs: 1000
+  # Linear warmup, then cosine decay to 0 at the final epoch
+  # (src/training/train.py:lr_factor). lr below is the peak.
+  warmup_epochs: 30
+  # Raised from 0.001: at 0.001 every heterophily run in the 2026-10-05 sweep
+  # had its best val AUPRC at the final epoch (300), still rising. 3x, not
+  # more, because pos_weight (~1,325) already makes illicit-class gradients large.
+  lr: 0.003
   weight_decay: 0.00001
   log_every: 10
 

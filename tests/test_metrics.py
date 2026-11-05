@@ -110,3 +110,22 @@ def test_train_eval_returns_everything_when_split_is_small():
     y = torch.tensor([0, 1, 0, 1])
     train_idx = torch.arange(4)
     assert torch.equal(select_train_eval_idx(train_idx, y, seed=42), train_idx)
+
+
+def test_best_f1_threshold_finds_the_separating_cut():
+    """Scores far below 0.5 that still rank perfectly: 0.5 catches nothing,
+    the val-tuned threshold catches everything."""
+    from src.eval.metrics import best_f1_threshold
+
+    y = _imbalanced()
+    scores = np.where(y == 1, 0.3, 0.1)
+    t = best_f1_threshold(y, scores)
+    assert 0.1 < t <= 0.3
+    assert classification_metrics(y, (scores >= t).astype(int), scores)["f1"] == 1.0
+    assert classification_metrics(y, (scores >= 0.5).astype(int), scores)["f1"] == 0.0
+
+
+def test_best_f1_threshold_without_positives_falls_back_to_half():
+    from src.eval.metrics import best_f1_threshold
+
+    assert best_f1_threshold(np.zeros(10, dtype=int), np.linspace(0, 1, 10)) == 0.5
