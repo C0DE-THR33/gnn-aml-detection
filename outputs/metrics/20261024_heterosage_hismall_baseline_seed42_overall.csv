@@ -1,0 +1,2 @@
+run_id,model,seed,config_path,best_epoch,best_val_auprc,precision,recall,f1,auprc,accuracy,trivial_accuracy,n,precision_at_0.5,recall_at_0.5,f1_at_0.5,threshold
+20261024_heterosage_hismall_baseline_seed42,heterophily_gnn,42,configs/heterophily_gnn_hismall.yaml,830,0.1013981492947362,0.18820224719101122,0.3728436282693378,0.25014000373343287,0.16747237261547823,0.9960449713440107,0.9982307228043782,1015669,0.013301423789951963,0.8536449638286032,0.026194684220861828,0.9893359541893005
