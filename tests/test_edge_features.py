@@ -96,3 +96,36 @@ def test_stale_graph_is_rejected_with_a_clear_message():
         check_graph_layout(stale)
 
     check_graph_layout(build_transaction_graph(_trans(["ACH", "Wire"])).data)  # current: ok
+
+
+def test_edge_aggregates_are_per_direction_mean_and_max():
+    """Two edges a0 -> b0 and a1 -> b0: b0's incoming mean/max, and zeros for
+    the direction an account has no edges in."""
+    from src.data.graph_builder import EDGE_ATTR_WIDTH, add_edge_aggregate_features
+
+    trans = _trans(["ACH", "Wire"])
+    trans["to_account"] = ["b0", "b0"]
+    trans["amount_paid"] = [100.0, 1000.0]
+    result = build_transaction_graph(trans)
+    data = add_edge_aggregate_features(result.data)
+    w = EDGE_ATTR_WIDTH
+    assert data.x.shape == (data.num_nodes, 2 + 4 * w)
+
+    b0 = result.account_to_idx["b0"]
+    in_mean, in_max = data.x[b0, 2 : 2 + w], data.x[b0, 2 + w : 2 + 2 * w]
+    out_mean_and_max = data.x[b0, 2 + 2 * w :]
+    lo, hi = torch.log1p(torch.tensor([100.0, 1000.0]))
+    assert in_mean[0] == pytest.approx(((lo + hi) / 2).item())
+    assert in_max[0] == pytest.approx(hi.item())
+    assert in_mean[1:].sum() == pytest.approx(1.0)  # half ACH, half Wire
+    assert torch.equal(out_mean_and_max, torch.zeros(2 * w))  # b0 sends nothing
+
+
+def test_lr_schedule_warms_up_then_decays_to_zero():
+    from src.training.train import lr_factor
+
+    assert lr_factor(1, 10, 100) == pytest.approx(0.1)
+    assert lr_factor(10, 10, 100) == pytest.approx(1.0)
+    assert lr_factor(55, 10, 100) == pytest.approx(0.5)
+    assert lr_factor(100, 10, 100) == pytest.approx(0.0)
+    assert lr_factor(37, 0, 100) == 1.0  # warmup 0 = constant lr

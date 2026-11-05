@@ -14,9 +14,9 @@ import pandas as pd
 import torch
 import yaml
 
-from src.data.graph_builder import check_graph_layout
+from src.data.graph_builder import add_edge_aggregate_features, check_graph_layout
 from src.device import describe_device, resolve_device
-from src.eval.metrics import classification_metrics, per_typology_metrics
+from src.eval.metrics import best_f1_threshold, classification_metrics, per_typology_metrics
 from src.models.baseline_sage import BaselineSAGE
 from src.models.heterophily_gnn import HeterophilyGNN
 from src.training.train import TrainConfig, train_model
@@ -39,6 +39,50 @@ def build_model(
     raise ValueError(f"Unknown model.type '{model_type}' — expected 'heterophily_gnn' or 'baseline_sage'.")
 
 
+def load_graph(config: dict):
+    """Load the saved graph and splits, add node features, move to device."""
+    stem = config["dataset"]["name"]
+    data = torch.load(f"data/processed/{stem}_graph.pt", weights_only=False)
+    with open(f"data/processed/{stem}_splits.pkl", "rb") as f:
+        splits = pickle.load(f)
+
+    check_graph_layout(data)
+    add_edge_aggregate_features(data)
+    device = resolve_device(config)
+    print(f"Device: {describe_device(device)}")
+    return data.to(device), splits, device
+
+
+def score(model, data, splits) -> tuple[dict, pd.DataFrame]:
+    """Test metrics at a threshold chosen on val, plus the 0.5 ones for comparison.
+
+    Returns:
+        (overall, per_typology). overall holds precision/recall/f1 at the
+        val-tuned threshold, the same three at 0.5 suffixed `_at_0.5`, and
+        `threshold` itself. AUPRC does not depend on the threshold.
+    """
+    model.eval()
+    with torch.no_grad():
+        logits = model(data.x, data.edge_index, data.edge_attr)
+        probs = torch.softmax(logits, dim=1)[:, 1].cpu().numpy()
+
+    y = data.y.cpu().numpy()
+    val_idx, test_idx = splits["val"], splits["test"]
+    threshold = best_f1_threshold(y[val_idx], probs[val_idx])
+    pred = (probs >= threshold).astype(int)
+
+    overall = classification_metrics(y[test_idx], pred[test_idx], probs[test_idx])
+    at_half = classification_metrics(y[test_idx], (probs[test_idx] >= 0.5).astype(int), probs[test_idx])
+    overall.update({f"{k}_at_0.5": at_half[k] for k in ("precision", "recall", "f1")})
+    overall["threshold"] = threshold
+
+    per_typ = per_typology_metrics(
+        y[test_idx], pred[test_idx], probs[test_idx],
+        [data.edge_typology[i] for i in test_idx],
+    )
+    return overall, per_typ
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -55,15 +99,7 @@ def main():
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    stem = config["dataset"]["name"]
-    data = torch.load(f"data/processed/{stem}_graph.pt", weights_only=False)
-    with open(f"data/processed/{stem}_splits.pkl", "rb") as f:
-        splits = pickle.load(f)
-
-    check_graph_layout(data)
-    device = resolve_device(config)
-    print(f"Device: {describe_device(device)}")
-    data = data.to(device)
+    data, splits, device = load_graph(config)
 
     model = build_model(
         config["model"]["type"], in_dim=data.x.shape[1], edge_attr_dim=data.edge_attr.shape[1],
@@ -76,6 +112,7 @@ def main():
         epochs=config["train"]["epochs"], lr=config["train"]["lr"],
         weight_decay=config["train"]["weight_decay"], loss_type=config["loss"]["type"],
         seed=seed, log_every=config["train"]["log_every"],
+        warmup_epochs=config["train"].get("warmup_epochs", 0),
     )
     result = train_model(model, data, splits, train_config)
 
@@ -83,23 +120,11 @@ def main():
     # (CONVENTIONS.md §2 run-ID format, §4 one config = one experiment).
     run_id = f"{datetime.now():%Y%m%d}_{config['run_id_prefix']}_seed{seed}"
 
-    # Final evaluation on test split
-    model.eval()
-    with torch.no_grad():
-        logits = model(data.x, data.edge_index, data.edge_attr)
-        probs = torch.softmax(logits, dim=1)[:, 1].cpu().numpy()
-        pred = (probs >= 0.5).astype(int)
-
-    test_idx = splits["test"]
-    y_cpu = data.y.cpu().numpy()
-    overall = classification_metrics(y_cpu[test_idx], pred[test_idx], probs[test_idx])
+    overall, per_typ = score(model, data, splits)
+    # Header text and the dict on the next line are parsed by the notebook.
     print("\n--- Overall test metrics ---")
     print(overall)
-
-    per_typ = per_typology_metrics(
-        y_cpu[test_idx], pred[test_idx], probs[test_idx],
-        [data.edge_typology[i] for i in test_idx],
-    )
+    print(f"(threshold {overall['threshold']:.4f}, chosen to maximise F1 on val)")
     print("\n--- Per-typology test metrics ---")
     print(per_typ)
 
@@ -110,6 +135,8 @@ def main():
             "state_dict": {k: v.cpu() for k, v in model.state_dict().items()},
             "config_path": args.config,
             "config": config,
+            # explain.py selects true positives at this threshold.
+            "threshold": overall["threshold"],
         },
         f"outputs/checkpoints/{run_id}.pt",
     )

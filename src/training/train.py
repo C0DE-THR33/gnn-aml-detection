@@ -8,6 +8,7 @@ and keeps the graph connected for propagation — see graph_builder.py /
 make_splits.py docstrings for the temporal-leakage caveat this implies.
 """
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -73,6 +74,9 @@ class TrainConfig:
     loss_type: str = "weighted_ce"  # "weighted_ce" or "focal"
     seed: int = 42
     log_every: int = 10
+    # Linear warmup over this many epochs, then cosine decay to 0 at `epochs`.
+    # 0 keeps the learning rate constant (the pre-2026-10-23 behaviour).
+    warmup_epochs: int = 0
 
 
 @dataclass
@@ -83,6 +87,20 @@ class TrainResult:
     # was never defined, in which case `model` holds the final epoch's weights).
     best_epoch: int | None = None
     best_val_auprc: float | None = None
+
+
+def lr_factor(epoch: int, warmup_epochs: int, total_epochs: int) -> float:
+    """Multiplier on the base lr for 1-based `epoch`: linear warmup, cosine decay.
+
+    Full-batch training takes one optimizer step per epoch, so a schedule over
+    epochs is a schedule over steps.
+    """
+    if warmup_epochs <= 0:
+        return 1.0
+    if epoch <= warmup_epochs:
+        return epoch / warmup_epochs
+    progress = (epoch - warmup_epochs) / max(1, total_epochs - warmup_epochs)
+    return 0.5 * (1 + math.cos(math.pi * progress))
 
 
 def _compute_loss(logits, y, loss_type, pos_weight):
@@ -117,6 +135,10 @@ def train_model(
     np.random.seed(config.seed)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    # LambdaLR counts steps from 0; lr_factor takes 1-based epochs.
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lambda step: lr_factor(step + 1, config.warmup_epochs, config.epochs)
+    )
 
     # Index tensors must live wherever the caller put the graph — scripts/
     # move `data` and `model` onto the device before calling in.
@@ -138,6 +160,7 @@ def train_model(
         loss = _compute_loss(logits[train_idx], data.y[train_idx], config.loss_type, pos_weight)
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         if epoch % config.log_every == 0 or epoch == config.epochs:
             model.eval()
@@ -172,7 +195,8 @@ def train_model(
                 f"val_recall {val_metrics['recall']:.3f} | "
                 f"val_f1 {val_metrics['f1']:.3f} | "
                 f"val_auprc {val_metrics['auprc']:.4f} | "
-                f"gap {train_metrics['auprc'] - val_metrics['auprc']:+.4f}"
+                f"gap {train_metrics['auprc'] - val_metrics['auprc']:+.4f} | "
+                f"lr {optimizer.param_groups[0]['lr']:.2e}"
             )
 
     if best_state is not None:

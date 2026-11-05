@@ -10,55 +10,75 @@ evaluation → GNNExplainer → per-typology fidelity) runs end to end on the re
 **HI-Small** data: 5,078,345 transactions, 515,080 accounts, 5,177 illicit
 transactions (0.102%). Training and explanation ran on a Colab T4.
 
-- **Last completed sweep** (2026-10-05): 300 epochs, edge features = log-amount
-  + payment-format one-hot, checkpoint taken at the best val-AUPRC epoch.
+- **Last completed sweep** (2026-10-23 to 25): node features now include each
+  account's mean/max incoming and outgoing edge features (x: 2 -> 38 columns),
+  1000 epochs at peak lr 0.003 with 30-epoch warmup + cosine decay, and the
+  decision threshold chosen on val instead of 0.5. Six runs per architecture.
   Results below.
-- **Previous sweep** (2026-09-05): 100 epochs, log-amount only. Kept for
-  comparison.
+- **Earlier sweeps** (2026-10-05: 300 epochs, payment format added; 2026-09-05:
+  100 epochs, log-amount only). Kept for comparison.
 
 ## Results so far
 
 Test split: 1,015,669 edges, 1,797 illicit (0.177%), so the AUPRC of a random
-ranker is **0.00177**. Three seeds per architecture, same graph, same splits,
-configs identical except `model.type` (enforced by `tests/test_configs.py`).
+ranker is **0.00177**. Same graph, same splits, configs identical except
+`model.type` (enforced by `tests/test_configs.py`).
 
-| model | sweep | test AUPRC (mean, range) | lift over chance | recall | F1 |
-|---|---|---|---|---|---|
-| `heterophily_gnn` | 2026-10-05 | **0.0917** (0.0868–0.0976) | 51.8x | 0.956 | 0.0227 |
-| `baseline_sage` | 2026-10-05 | **0.0800** (0.0752–0.0871) | 45.2x | 0.979 | 0.0199 |
-| `heterophily_gnn` | 2026-09-05 | 0.0371 (0.0357–0.0383) | 21.0x | 0.832 | 0.0152 |
-| `baseline_sage` | 2026-09-05 | 0.0263 (0.0240–0.0278) | 14.8x | 0.794 | 0.0136 |
+| model | sweep | runs | test AUPRC (mean, range) | lift over chance | precision | recall | F1 |
+|---|---|---|---|---|---|---|---|
+| `heterophily_gnn` | 2026-10-23 | 6 | **0.257** (0.167–0.313) | 145x | 0.313 | 0.352 | **0.324** |
+| `baseline_sage` | 2026-10-23 | 6 | **0.195** (0.170–0.225) | 110x | 0.219 | 0.407 | **0.282** |
+| `heterophily_gnn` | 2026-10-05 | 3 | 0.0917 (0.0868–0.0976) | 51.8x | 0.012 | 0.956 | 0.0227 |
+| `baseline_sage` | 2026-10-05 | 3 | 0.0800 (0.0752–0.0871) | 45.2x | 0.010 | 0.979 | 0.0199 |
+| `heterophily_gnn` | 2026-09-05 | 3 | 0.0371 (0.0357–0.0383) | 21.0x | | 0.832 | 0.0152 |
+| `baseline_sage` | 2026-09-05 | 3 | 0.0263 (0.0240–0.0278) | 14.8x | | 0.794 | 0.0136 |
 
-- **Both changes helped, and both models are still undertrained.** At epoch 100
-  (no LR schedule, so like for like with the previous sweep) payment format alone
-  raised val AUPRC +29% for the heterophily model and +44% for the baseline.
-  Epochs 100→300 added another 55–75%. All three heterophily runs had their best
-  val AUPRC at epoch 300 and every run was still rising over epochs 250–300, so
-  these numbers are a floor.
-- **The heterophily model still leads, but the gap narrowed** from +41.5% to
-  **+14.6%** relative AUPRC. The gap (0.0117) is now about equal to the largest
-  within-model seed spread (0.97x, was 2.9x), and the ranges touch: the worst
-  heterophily seed (0.0868) is below the best baseline seed (0.0871). Payment
-  format helped the baseline more, so part of the earlier gap was the baseline
-  lacking that signal. n=3 per arm cannot separate the two models.
-- **Per typology the result is split.** The heterophily model wins 4 of 8
-  (fan_out 1.72x, gather_scatter 1.58x, scatter_gather 1.30x, random 1.24x), ties
-  fan_in (0.99x), and loses bipartite (0.66x), cycle (0.73x) and stack (0.89x).
-  In the previous sweep it won all eight.
-- **The detection/fidelity inverse relation did not replicate.** The previous
-  sweep had Spearman(detection lift, fidelity) = −0.893 (p = 0.007, n = 7); this
-  sweep gives +0.214 (p = 0.645). Treat the earlier finding as not established.
-- **Fidelity rose for the fan and gather/scatter typologies** (fan_out 0.37→0.47,
-  gather_scatter 0.40→0.49, scatter_gather 0.16→0.22, fan_in 0.46→0.51) and
-  stayed near zero for cycle (0.04), stack (0.07) and bipartite (0.14). Fidelity
-  is measured on one checkpoint (heterophily, seed 42) under three explainer
-  seeds (n = 150 per typology, seed spread 0.000–0.057). The two sweeps explain
-  different true positives, so these are not paired comparisons.
-- **Do not quote accuracy.** A model that always predicts "licit" scores 99.82%;
-  the real models score ~83–85% because `pos_weight` (~1,325) pushes them to flag
-  ~15% of traffic, so precision is ~1%. Lead with AUPRC against the base rate.
+2026-10-23 precision/recall/F1 are at the threshold that maximises F1 on val
+(0.989–0.998); earlier rows are at 0.5. At 0.5 the 2026-10-23 runs score F1
+0.047 (heterophily) and 0.034 (baseline).
 
-Both sweeps are versioned: metrics CSVs (`outputs/metrics/{date}_*`), fidelity
+- **The underfitting is fixed.** AUPRC rose 2.4–2.8x over the 2026-10-05 sweep.
+  The model only ever saw degree in message passing before; the edge-feature
+  aggregates and 3.3x more optimizer steps changed together, so the gain can't
+  be split between them. Train AUPRC now exceeds val (it never did before), and
+  val AUPRC is flat over the last ~150 epochs as the lr decays to 0.
+- **The heterophily model leads, but only just separably.** +0.062 AUPRC (+32%
+  relative), Welch p = 0.034; a Mann-Whitney U test gives p = 0.093, and the
+  ranges overlap (worst heterophily run 0.167, best baseline 0.225). F1 +0.043,
+  p = 0.089. The heterophily model trades recall (0.35 vs 0.41) for precision
+  (0.31 vs 0.22).
+- **The heterophily model is much less stable.** Its seed-to-seed std is 2.5x the
+  baseline's (0.053 vs 0.021). Seed 42 trained twice with identical code scored
+  0.262 and 0.168 (CUDA non-determinism), and one run peaked at epoch 230 of
+  1000. A lower peak lr or gradient clipping may tighten it.
+- **Per typology the heterophily model wins 7 of 8** on mean AUPRC: fan_out
+  3.30x, gather_scatter 2.35x, scatter_gather 2.15x, random 1.60x, cycle 1.49x,
+  stack 1.24x, bipartite 1.13x; fan_in 0.95x. The large wins are the high-count
+  fan/gather/scatter typologies.
+- **Fidelity has three tiers.** One checkpoint (heterophily, 2026-10-23 seed 42,
+  at its tuned threshold) under three explainer seeds:
+
+  | typology | mean fidelity | 95% CI | n | seed spread |
+  |---|---|---|---|---|
+  | bipartite | 0.348 | ±0.116 | 66 | 0.136 |
+  | fan_out | 0.346 | ±0.041 | 150 | 0.023 |
+  | gather_scatter | 0.233 | ±0.027 | 150 | 0.053 |
+  | fan_in | 0.228 | ±0.024 | 93 | 0.027 |
+  | scatter_gather | 0.077 | ±0.012 | 150 | 0.007 |
+  | stack | 0.067 | ±0.022 | 141 | 0.028 |
+  | cycle | 0.013 | ±0.025 | 78 | 0.038 |
+
+  The tuned threshold leaves fewer than 50 true positives for bipartite, cycle
+  and fan_in, and bipartite's seed spread is as wide as the gap to the next tier.
+  Fidelity is lower than in the 2026-10-05 sweep for most typologies (e.g.
+  gather_scatter 0.49 -> 0.23), but the two explain different true positives
+  from different models, so this is not a paired comparison.
+- **Detection and fidelity are unrelated.** Spearman(per-typology AUPRC lift,
+  fidelity) = 0.04 (n = 7), after −0.893 and +0.214 in the two earlier sweeps.
+- **Do not quote accuracy.** A model that always predicts "licit" scores 99.82%.
+  Lead with AUPRC against the base rate.
+
+All sweeps are versioned: metrics CSVs (`outputs/metrics/{date}_*`), fidelity
 CSVs (`outputs/explanations/fidelity_{date}_*.csv`) and report figures
 (`outputs/reports/figures/{date}_*`); `train.py` and `explain.py` date them
 with the day the run started. Checkpoints, logs and per-transaction
@@ -143,7 +163,7 @@ python tests/make_synthetic_fixture.py   # only if tests/fixtures/ is missing
 pytest tests/ -v
 ```
 
-47 tests against a small synthetic fixture matching the HI-Small schema. They
+52 tests against a small synthetic fixture matching the HI-Small schema. They
 verify the code runs and that specific past defects stay fixed (fidelity scorer
 bugs, the accounts loader, the Colab bundle, config drift). **They say nothing
 about model performance on real data**: the fixture's laundering patterns are
@@ -186,17 +206,18 @@ the fixture and any subsample.
 - **The split is not prevalence-matched.** Illicit density rises across the
   window: train 0.075%, val 0.107%, test 0.177%. Train and val metrics are not
   directly comparable.
-- **Node features are in/out-degree only.** `accounts.csv` (entity type, bank) is
-  loaded correctly but unused.
+- **Node features are in/out-degree plus edge-feature aggregates.**
+  `accounts.csv` (entity type, bank) is loaded correctly but unused. The
+  aggregates use all edges, including test edges (same leakage as above).
 - **Account identity is the account number alone.** 8 account numbers exist under
   two different banks, so 8 pairs of distinct accounts are merged into 8 nodes
   (515,080 nodes vs 515,088 distinct bank+account pairs; 0.0016%).
 
 ### Next steps
 
-1. Train longer or with a higher learning rate (currently 0.001, no schedule):
-   every heterophily run peaked at its last epoch.
-2. More seeds per model (e.g. 5): with a +14.6% gap and touching ranges, three
-   seeds cannot say whether the heterophily model's lead is real.
+1. Stabilise heterophily training (peak lr 0.002 or gradient clipping): its
+   seed spread is what keeps the architecture comparison marginal.
+2. Ablate the two 2026-10-23 changes (edge aggregates vs longer schedule) to
+   attribute the 2.4–2.8x gain.
 3. Account-level node features from `accounts.csv`.
-4. Remove the degree leakage.
+4. Remove the degree and aggregate leakage.

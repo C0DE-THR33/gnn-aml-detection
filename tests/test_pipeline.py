@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from src.data.graph_builder import build_transaction_graph
+from src.data.graph_builder import add_edge_aggregate_features, build_transaction_graph
 from src.data.load_raw import load_accounts, load_transactions, parse_patterns
 from src.data.make_splits import make_temporal_split
 from src.eval.metrics import classification_metrics
@@ -65,12 +65,20 @@ def test_temporal_split_is_disjoint_and_covers_all_edges(loaded_data):
 @pytest.mark.parametrize("model_cls", [BaselineSAGE, HeterophilyGNN])
 def test_model_trains_without_error(loaded_data, model_cls):
     trans, patterns, _ = loaded_data
-    data = build_transaction_graph(trans, patterns).data
+    # Same feature path and schedule as scripts/train.py.
+    data = add_edge_aggregate_features(build_transaction_graph(trans, patterns).data)
     splits = make_temporal_split(trans)
     model = model_cls(in_dim=data.x.shape[1], edge_attr_dim=data.edge_attr.shape[1])
-    result = train_model(model, data, splits, TrainConfig(epochs=5, log_every=5))
+    result = train_model(model, data, splits, TrainConfig(epochs=5, log_every=5, warmup_epochs=2))
     assert len(result.history) >= 1
     assert torch.isfinite(torch.tensor(result.history[-1]["train_loss"]))
+
+    from scripts.train import score
+
+    overall, per_typ = score(model, data, splits)
+    assert 0.0 <= overall["threshold"] <= 1.0
+    assert {"f1", "f1_at_0.5", "auprc"} <= overall.keys()
+    assert len(per_typ) > 0
 
 
 def test_training_restores_the_best_val_epoch(loaded_data):

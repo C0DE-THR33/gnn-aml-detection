@@ -7,7 +7,13 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import average_precision_score, f1_score, precision_score, recall_score
+from sklearn.metrics import (
+    average_precision_score,
+    f1_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+)
 
 from src.data.typologies import EVALUATED_TYPOLOGIES
 
@@ -50,6 +56,25 @@ def classification_metrics(y_true: np.ndarray, y_pred: np.ndarray, y_score: np.n
         "trivial_accuracy": trivial_accuracy,
         "n": len(y_true),
     }
+
+
+def best_f1_threshold(y_true: np.ndarray, y_score: np.ndarray) -> float:
+    """Decision threshold on y_score that maximises illicit-class F1.
+
+    Pick it on the VALIDATION split and apply it unchanged to test. The
+    default 0.5 means nothing under a ~1,300x pos_weight: the loss pushes
+    scores up, so 0.5 flags far too many edges (2026-10-23 sweep: 3% precision
+    at 72% recall).
+
+    Returns 0.5 if y_true has no positives (no F1 to maximise).
+    """
+    if y_true.sum() == 0:
+        return 0.5
+    precision, recall, thresholds = precision_recall_curve(y_true, y_score)
+    # The last precision/recall pair has no threshold (recall 0 endpoint).
+    p, r = precision[:-1], recall[:-1]
+    f1 = np.divide(2 * p * r, p + r, out=np.zeros_like(p), where=(p + r) > 0)
+    return float(thresholds[np.argmax(f1)])
 
 
 def per_typology_metrics(

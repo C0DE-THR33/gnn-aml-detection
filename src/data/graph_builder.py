@@ -26,6 +26,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data
+from torch_geometric.utils import scatter
 
 from src.data.load_raw import PAYMENT_FORMATS
 from src.data.typologies import Typology
@@ -100,6 +101,30 @@ def build_transaction_graph(
     data.edge_typology = edge_typology  # list[str], parallel to edges
 
     return GraphBuildResult(data=data, account_to_idx=account_to_idx, idx_to_account=idx_to_account)
+
+
+def add_edge_aggregate_features(data: Data) -> Data:
+    """Append per-account mean/max of incoming and outgoing edge_attr to data.x.
+
+    The aggregators in both models pass node features only, so without this
+    the GNN layers never see amounts or payment formats: they propagate log
+    degree, and edge features reach only the final edge head. Done at load
+    time over the full graph, not at build time, so the saved graph on Drive
+    stays valid. Explainer subgraphs index into this x, so subgraph logits
+    still match full-graph logits.
+
+    Width goes from 2 to 2 + 4 * EDGE_ATTR_WIDTH. Accounts with no edges in a
+    direction get zeros for that direction.
+    """
+    src, dst = data.edge_index
+    n = data.num_nodes
+    aggs = [
+        scatter(data.edge_attr, index, dim=0, dim_size=n, reduce=reduce)
+        for index in (dst, src)  # incoming, outgoing
+        for reduce in ("mean", "max")
+    ]
+    data.x = torch.cat([data.x, *aggs], dim=1)
+    return data
 
 
 def check_graph_layout(data: Data) -> None:

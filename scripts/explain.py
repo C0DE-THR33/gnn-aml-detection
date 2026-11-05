@@ -15,7 +15,7 @@ import pandas as pd
 import torch
 import yaml
 
-from src.data.graph_builder import check_graph_layout
+from src.data.graph_builder import add_edge_aggregate_features, check_graph_layout
 from src.device import describe_device, resolve_device
 from src.explain.fidelity import score_typology_fidelity
 from src.explain.run_explainer import build_explainer, explain_edge, select_explanation_sample
@@ -46,6 +46,7 @@ def main():
         splits = pickle.load(f)
 
     check_graph_layout(data)
+    add_edge_aggregate_features(data)
     device = resolve_device(config)
     print(f"Device: {describe_device(device)}")
     data = data.to(device)
@@ -63,7 +64,8 @@ def main():
     with torch.no_grad():
         logits = model(data.x, data.edge_index, data.edge_attr)
         probs = torch.softmax(logits, dim=1)[:, 1].cpu().numpy()
-        pred = (probs >= 0.5).astype(int)
+        # Checkpoints from before 2026-10-24 have no tuned threshold.
+        pred = (probs >= ckpt.get("threshold", 0.5)).astype(int)
 
     test_idx = splits["test"]
     sample = select_explanation_sample(
